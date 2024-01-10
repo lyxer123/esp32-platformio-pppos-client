@@ -20,6 +20,8 @@
 #include "bg96.h"
 #include "sim7600.h"
 
+#include <esp_http_client.h>
+
 #define BROKER_URL "mqtt://mqtt.esp32.eu.org"
 
 static const char *TAG = "pppos_example";
@@ -27,7 +29,7 @@ static EventGroupHandle_t event_group = NULL;
 static const int CONNECT_BIT = BIT0;
 static const int STOP_BIT = BIT1;
 static const int GOT_DATA_BIT = BIT2;
-    modem_dce_t *dce = NULL;
+modem_dce_t *dce = NULL;
 
 #if CONFIG_EXAMPLE_SEND_MSG
 /**
@@ -124,6 +126,81 @@ err:
     return ESP_FAIL;
 }
 #endif
+
+// 配置 HTTP 客户端
+esp_http_client_config_t http_config = {
+    .url = "http://httpbin.org/anything?client=ESP32_PPPoS", // 替换为您要访问的 URL
+};
+
+// HTTP 客户端配置
+esp_http_client_config_t http_config1 = {
+    .url = "http://example.com/post", // 替换为您的目标 URL
+    .method = HTTP_METHOD_POST,       // 设置为 POST 方法
+};
+
+// HTTP 事件处理函数
+esp_err_t _http_event_handler(esp_http_client_event_t *evt)
+{
+    static char *output_buffer; // 缓冲区存储响应内容
+    static int output_len;      // 接收到的数据长度
+
+    switch (evt->event_id)
+    {
+    case HTTP_EVENT_ERROR:
+        Serial.println("HTTP_EVENT_ERROR");
+        break;
+    case HTTP_EVENT_ON_CONNECTED:
+        Serial.println("HTTP_EVENT_ON_CONNECTED");
+        break;
+    case HTTP_EVENT_HEADER_SENT:
+        Serial.println("HTTP_EVENT_HEADER_SENT");
+        break;
+    case HTTP_EVENT_ON_HEADER:
+        Serial.printf("HTTP_EVENT_ON_HEADER, key=%s, value=%s\n", evt->header_key, evt->header_value);
+        break;
+    case HTTP_EVENT_ON_DATA:
+        if (!esp_http_client_is_chunked_response(evt->client))
+        {
+            // 如果响应不是分块的，直接打印数据
+            Serial.printf("HTTP_EVENT_ON_DATA, len=%d\n", evt->data_len);
+            if (output_buffer == NULL)
+            {
+                output_buffer = (char *)malloc(esp_http_client_get_content_length(evt->client));
+                output_len = 0;
+                if (output_buffer == NULL)
+                {
+                    Serial.println("Failed to allocate memory for output buffer");
+                    return ESP_FAIL;
+                }
+            }
+            memcpy(output_buffer + output_len, evt->data, evt->data_len);
+            output_len += evt->data_len;
+        }
+        break;
+    case HTTP_EVENT_ON_FINISH:
+        Serial.println("HTTP_EVENT_ON_FINISH");
+        if (output_buffer != NULL)
+        {
+            // 输出接收到的完整数据
+            Serial.print("Received data:");
+            Serial.println(output_buffer);
+            free(output_buffer);
+            output_buffer = NULL;
+            output_len = 0;
+        }
+        break;
+    case HTTP_EVENT_DISCONNECTED:
+        Serial.println("HTTP_EVENT_DISCONNECTED");
+        if (output_buffer != NULL)
+        {
+            free(output_buffer);
+            output_buffer = NULL;
+            output_len = 0;
+        }
+        break;
+    }
+    return ESP_OK;
+}
 
 static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -238,6 +315,10 @@ static void on_ip_event(void *arg, esp_event_base_t event_base,
 void setup(void)
 {
     Serial.begin(115200);
+    pinMode(16, OUTPUT);
+    digitalWrite(16, HIGH);
+    delay(1000);
+
 #if CONFIG_LWIP_PPP_PAP_SUPPORT
     esp_netif_auth_type_t auth_type = NETIF_PPP_AUTHTYPE_PAP;
 #elif CONFIG_LWIP_PPP_CHAP_SUPPORT
@@ -298,9 +379,11 @@ void setup(void)
     ESP_ERROR_CHECK(dce->store_profile(dce));
     while (!dce->oper || strlen(dce->oper) < 2)
     {
-       delay(1000);
-        if(dce && !dce->oper < 2) esp_modem_dce_get_operator_name(dce);
-        else ESP_LOGW(TAG, "Operator name: %s", dce?dce->oper:"");
+        delay(1000);
+        if (dce && !dce->oper < 2)
+            esp_modem_dce_get_operator_name(dce);
+        else
+            ESP_LOGW(TAG, "Operator name: %s", dce ? dce->oper : "");
     }
 
     /* Print Module ID, Operator, IMEI, IMSI */
@@ -325,14 +408,21 @@ void setup(void)
     /* Wait for IP address */
     xEventGroupWaitBits(event_group, CONNECT_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
 
+    // 初始化 HTTP 客户端
+    // http_config.event_handler = _http_event_handler;
+
     /* Config MQTT */
-    esp_mqtt_client_config_t mqtt_config = {
-        .event_handle = mqtt_event_handler,
-        .uri = BROKER_URL,
-    };
-    esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_config);
-    esp_mqtt_client_start(mqtt_client);
-    xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+    // esp_mqtt_client_config_t mqtt_config = {
+    //     .event_handle = mqtt_event_handler,
+    //     .uri = BROKER_URL,
+    // };
+    // esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_config);
+    // esp_mqtt_client_start(mqtt_client);
+    // xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+    // delay(1000);
+
+    //http_config.event_handler = _http_event_handler;
+
 
     // --------------------------------- > DEINIT PPPOS <------------------------------- //
 
@@ -362,5 +452,47 @@ void setup(void)
 
 void loop()
 {
-    // put your main code here, to run repeatedly:
+    // Serial.print("void loop ");
+    // esp_http_client_handle_t client = esp_http_client_init(&http_config);
+
+    // // 设置 POST 数据
+    // const char* post_data = "key1=value1&key2=value2"; // 替换为您的 POST 数据
+    // esp_http_client_set_post_field(client, post_data, strlen(post_data));
+    // esp_http_client_set_header(client, "Content-Type", "application/x-www-form-urlencoded");
+
+    // // 执行 HTTP POST 请求
+    // esp_err_t err = esp_http_client_perform(client);
+
+    // if (err == ESP_OK) {
+    //     Serial.print("HTTP POST Status = ");
+    //     Serial.println(esp_http_client_get_status_code(client));
+    // } else {
+    //     Serial.print("HTTP POST request failed: ");
+    //     Serial.println(esp_err_to_name(err));
+    // }
+
+    // // 清理
+    // esp_http_client_cleanup(client);
+
+    http_config.event_handler = _http_event_handler;
+    esp_http_client_handle_t client = esp_http_client_init(&http_config);
+
+    // 发送 HTTP GET 请求
+    esp_err_t err = esp_http_client_perform(client);
+
+    if (err == ESP_OK)
+    {
+        Serial.print("HTTP GET Status = ");
+        Serial.println(esp_http_client_get_status_code(client));
+    }
+    else
+    {
+        Serial.print("HTTP GET request failed: ");
+        Serial.println(esp_err_to_name(err));
+    }
+
+    // 清理
+    esp_http_client_cleanup(client);
+
+    delay(5000);
 }

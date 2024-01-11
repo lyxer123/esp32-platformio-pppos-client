@@ -24,8 +24,8 @@
 
 #define BROKER_URL "mqtt://test.mosquitto.org"
 
-const char *mqtt_server = "test.mosquitto.org";             // 替换为您的 MQTT 服务器地址
-const int mqtt_port = 1883;                                 // MQTT 端口，通常为 1883
+const char *mqtt_server = "test.mosquitto.org"; // 替换为您的 MQTT 服务器地址
+const int mqtt_port = 1883;                     // MQTT 端口，通常为 1883
 esp_mqtt_client_handle_t client;
 
 static const char *TAG = "pppos_example";
@@ -34,6 +34,10 @@ static const int CONNECT_BIT = BIT0;
 static const int STOP_BIT = BIT1;
 static const int GOT_DATA_BIT = BIT2;
 modem_dce_t *dce = NULL;
+
+// 状态标志
+bool isMqttConnected = false;
+bool isMqttSubscribed = true;
 
 // 订阅 MQTT topic 的函数
 void subscribeToTopic(const char *topic, int qos)
@@ -238,63 +242,74 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
     }
 }
 
-static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
+static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
+{
     client = event->client;
-    switch (event->event_id) {
-        case MQTT_EVENT_CONNECTED:
-            Serial.println("MQTT_EVENT_CONNECTED");
-            // 连接成功后订阅 topics
-            subscribeToTopic("/topic/qos0", 0);
-            subscribeToTopic("/topic/qos1", 1);
-            subscribeToTopic("/another/topic", 0);
-            break;
+    switch (event->event_id)
+    {
+    case MQTT_EVENT_CONNECTED:
+        Serial.println("MQTT_EVENT_CONNECTED");
+        // 连接成功后订阅 topics
+        // subscribeToTopic("/topic/qos0", 0);
+        // subscribeToTopic("/topic/qos1", 1);
+        // subscribeToTopic("/another/topic", 0);
+        // break;
 
-        case MQTT_EVENT_DISCONNECTED:
-            Serial.println("MQTT_EVENT_DISCONNECTED");
-            break;
+        // Serial.println("MQTT Connected");
+        isMqttConnected = true;
+        break;
 
-        case MQTT_EVENT_SUBSCRIBED:
-            Serial.print("Subscribed to topic with msg_id=");
-            Serial.println(event->msg_id);
-            break;
+    case MQTT_EVENT_DISCONNECTED:
+        // Serial.println("MQTT_EVENT_DISCONNECTED");
+        // break;
 
-        case MQTT_EVENT_UNSUBSCRIBED:
-            Serial.print("Unsubscribed from topic with msg_id=");
-            Serial.println(event->msg_id);
-            break;
+        Serial.println("MQTT Disconnected");
+        isMqttConnected = false;
+        break;
 
-        case MQTT_EVENT_PUBLISHED:
-            Serial.print("Message published with msg_id=");
-            Serial.println(event->msg_id);
-            break;
+    case MQTT_EVENT_SUBSCRIBED:
+        Serial.print("Subscribed to topic with msg_id=");
+        Serial.println(event->msg_id);
+        break;
 
-        case MQTT_EVENT_DATA:
-            Serial.print("Received data on topic=");
-            Serial.write(event->topic, event->topic_len);
-            Serial.println();
-            Serial.print("Data: ");
-            Serial.write(event->data, event->data_len);
-            Serial.println();
-            break;
+    case MQTT_EVENT_UNSUBSCRIBED:
+        Serial.print("Unsubscribed from topic with msg_id=");
+        Serial.println(event->msg_id);
+        break;
 
-        case MQTT_EVENT_ERROR:
-            Serial.println("MQTT_EVENT_ERROR");
-            if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
-                Serial.print("Last error code reported from esp-tls: ");
-                Serial.println(event->error_handle->esp_tls_last_esp_err);
-                Serial.print("Last tls stack error number: ");
-                Serial.println(event->error_handle->esp_tls_stack_err);
-                Serial.print("Last captured errno : ");
-                Serial.println(event->error_handle->esp_transport_sock_errno);
-                Serial.println("Translated to esp_err_t: ");
-                //Serial.println(esp_transport_sock_errno_trans(event->error_handle->esp_transport_sock_errno));
-            }
-            break;
+    case MQTT_EVENT_PUBLISHED:
+        Serial.print("Message published with msg_id=");
+        Serial.println(event->msg_id);
+        break;
 
-        default:
-            Serial.print("Unhandled MQTT event id=");
-            Serial.println(event->event_id);
-            break;
+    case MQTT_EVENT_DATA:
+        Serial.print("Received data on topic=");
+        Serial.write(event->topic, event->topic_len);
+        Serial.println();
+        Serial.print("Data: ");
+        Serial.write(event->data, event->data_len);
+        Serial.println();
+        break;
+
+    case MQTT_EVENT_ERROR:
+        Serial.println("MQTT_EVENT_ERROR");
+        if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
+        {
+            Serial.print("Last error code reported from esp-tls: ");
+            Serial.println(event->error_handle->esp_tls_last_esp_err);
+            Serial.print("Last tls stack error number: ");
+            Serial.println(event->error_handle->esp_tls_stack_err);
+            Serial.print("Last captured errno : ");
+            Serial.println(event->error_handle->esp_transport_sock_errno);
+            Serial.println("Translated to esp_err_t: ");
+            // Serial.println(esp_transport_sock_errno_trans(event->error_handle->esp_transport_sock_errno));
+        }
+        break;
+
+    default:
+        Serial.print("Unhandled MQTT event id=");
+        Serial.println(event->event_id);
+        break;
     }
     return ESP_OK;
 }
@@ -455,8 +470,7 @@ void setup(void)
     };
     esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_config);
     esp_mqtt_client_start(mqtt_client);
-    xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-
+    // xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
 
     // http_config.event_handler = _http_event_handler;
 
@@ -488,28 +502,22 @@ void setup(void)
 
 void loop()
 {
+    if (isMqttConnected && isMqttSubscribed)
+    {
+        // MQTT 连接后的逻辑（如发布或订阅）
+        subscribeToTopic("/topic/qos0", 0);
+        subscribeToTopic("/topic/qos1", 1);
+        subscribeToTopic("/another/topic", 0);
+        isMqttSubscribed=false;
+    }
+
+    if (!isMqttConnected )
+    {
+        isMqttSubscribed=true;
+    }
+        
+
     // Serial.print("void loop ");
-    // esp_http_client_handle_t client = esp_http_client_init(&http_config);
-
-    // // 设置 POST 数据
-    // const char* post_data = "key1=value1&key2=value2"; // 替换为您的 POST 数据
-    // esp_http_client_set_post_field(client, post_data, strlen(post_data));
-    // esp_http_client_set_header(client, "Content-Type", "application/x-www-form-urlencoded");
-
-    // // 执行 HTTP POST 请求
-    // esp_err_t err = esp_http_client_perform(client);
-
-    // if (err == ESP_OK) {
-    //     Serial.print("HTTP POST Status = ");
-    //     Serial.println(esp_http_client_get_status_code(client));
-    // } else {
-    //     Serial.print("HTTP POST request failed: ");
-    //     Serial.println(esp_err_to_name(err));
-    // }
-
-    // // 清理
-    // esp_http_client_cleanup(client);
-
     http_config.event_handler = _http_event_handler;
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
 

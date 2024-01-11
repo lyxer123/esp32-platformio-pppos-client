@@ -22,7 +22,11 @@
 
 #include <esp_http_client.h>
 
-#define BROKER_URL "mqtt://mqtt.esp32.eu.org"
+#define BROKER_URL "mqtt://test.mosquitto.org"
+
+const char *mqtt_server = "test.mosquitto.org";             // 替换为您的 MQTT 服务器地址
+const int mqtt_port = 1883;                                 // MQTT 端口，通常为 1883
+esp_mqtt_client_handle_t client;
 
 static const char *TAG = "pppos_example";
 static EventGroupHandle_t event_group = NULL;
@@ -30,6 +34,18 @@ static const int CONNECT_BIT = BIT0;
 static const int STOP_BIT = BIT1;
 static const int GOT_DATA_BIT = BIT2;
 modem_dce_t *dce = NULL;
+
+// 订阅 MQTT topic 的函数
+void subscribeToTopic(const char *topic, int qos)
+{
+    esp_mqtt_client_subscribe(client, topic, qos);
+}
+
+// 发布 MQTT 消息的函数
+void publishMessage(const char *topic, const char *data)
+{
+    esp_mqtt_client_publish(client, topic, data, 0, 1, 0);
+}
 
 #if CONFIG_EXAMPLE_SEND_MSG
 /**
@@ -145,6 +161,7 @@ esp_err_t _http_event_handler(esp_http_client_event_t *evt)
     static int output_len;      // 接收到的数据长度
 
     switch (evt->event_id)
+
     {
     case HTTP_EVENT_ERROR:
         Serial.println("HTTP_EVENT_ERROR");
@@ -221,43 +238,63 @@ static void modem_event_handler(void *event_handler_arg, esp_event_base_t event_
     }
 }
 
-static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
-{
-    esp_mqtt_client_handle_t client = event->client;
-    int msg_id;
-    switch (event->event_id)
-    {
-    case MQTT_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-        msg_id = esp_mqtt_client_subscribe(client, "/topic/esp-pppos", 0);
-        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
-        break;
-    case MQTT_EVENT_DISCONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
-        break;
-    case MQTT_EVENT_SUBSCRIBED:
-        ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        // msg_id = esp_mqtt_client_publish(client, "/topic/esp-pppos", "esp32-pppos", 0, 0, 0);
-        // ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
-        break;
-    case MQTT_EVENT_UNSUBSCRIBED:
-        ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_PUBLISHED:
-        ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_DATA:
-        ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-        printf("DATA=%.*s\r\n", event->data_len, event->data);
-        xEventGroupSetBits(event_group, GOT_DATA_BIT);
-        break;
-    case MQTT_EVENT_ERROR:
-        ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
-        break;
-    default:
-        ESP_LOGI(TAG, "MQTT other event id: %d", event->event_id);
-        break;
+static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
+    client = event->client;
+    switch (event->event_id) {
+        case MQTT_EVENT_CONNECTED:
+            Serial.println("MQTT_EVENT_CONNECTED");
+            // 连接成功后订阅 topics
+            subscribeToTopic("/topic/qos0", 0);
+            subscribeToTopic("/topic/qos1", 1);
+            subscribeToTopic("/another/topic", 0);
+            break;
+
+        case MQTT_EVENT_DISCONNECTED:
+            Serial.println("MQTT_EVENT_DISCONNECTED");
+            break;
+
+        case MQTT_EVENT_SUBSCRIBED:
+            Serial.print("Subscribed to topic with msg_id=");
+            Serial.println(event->msg_id);
+            break;
+
+        case MQTT_EVENT_UNSUBSCRIBED:
+            Serial.print("Unsubscribed from topic with msg_id=");
+            Serial.println(event->msg_id);
+            break;
+
+        case MQTT_EVENT_PUBLISHED:
+            Serial.print("Message published with msg_id=");
+            Serial.println(event->msg_id);
+            break;
+
+        case MQTT_EVENT_DATA:
+            Serial.print("Received data on topic=");
+            Serial.write(event->topic, event->topic_len);
+            Serial.println();
+            Serial.print("Data: ");
+            Serial.write(event->data, event->data_len);
+            Serial.println();
+            break;
+
+        case MQTT_EVENT_ERROR:
+            Serial.println("MQTT_EVENT_ERROR");
+            if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+                Serial.print("Last error code reported from esp-tls: ");
+                Serial.println(event->error_handle->esp_tls_last_esp_err);
+                Serial.print("Last tls stack error number: ");
+                Serial.println(event->error_handle->esp_tls_stack_err);
+                Serial.print("Last captured errno : ");
+                Serial.println(event->error_handle->esp_transport_sock_errno);
+                Serial.println("Translated to esp_err_t: ");
+                //Serial.println(esp_transport_sock_errno_trans(event->error_handle->esp_transport_sock_errno));
+            }
+            break;
+
+        default:
+            Serial.print("Unhandled MQTT event id=");
+            Serial.println(event->event_id);
+            break;
     }
     return ESP_OK;
 }
@@ -412,17 +449,16 @@ void setup(void)
     // http_config.event_handler = _http_event_handler;
 
     /* Config MQTT */
-    // esp_mqtt_client_config_t mqtt_config = {
-    //     .event_handle = mqtt_event_handler,
-    //     .uri = BROKER_URL,
-    // };
-    // esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_config);
-    // esp_mqtt_client_start(mqtt_client);
-    // xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-    // delay(1000);
+    esp_mqtt_client_config_t mqtt_config = {
+        .event_handle = mqtt_event_handler,
+        .uri = BROKER_URL,
+    };
+    esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_config);
+    esp_mqtt_client_start(mqtt_client);
+    xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
 
-    //http_config.event_handler = _http_event_handler;
 
+    // http_config.event_handler = _http_event_handler;
 
     // --------------------------------- > DEINIT PPPOS <------------------------------- //
 

@@ -470,7 +470,7 @@ void setup(void)
     };
     esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_config);
     esp_mqtt_client_start(mqtt_client);
-    // xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+    // xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);    //阻塞模式，可能导致别的程序代码使用不了
 
     // http_config.event_handler = _http_event_handler;
 

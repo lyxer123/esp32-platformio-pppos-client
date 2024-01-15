@@ -139,20 +139,10 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
     {
     case MQTT_EVENT_CONNECTED:
         Serial.println("MQTT_EVENT_CONNECTED");
-        // 连接成功后订阅 topics
-        // subscribeToTopic("/topic/qos0", 0);
-        // subscribeToTopic("/topic/qos1", 1);
-        // subscribeToTopic("/another/topic", 0);
-        // break;
-
-        // Serial.println("MQTT Connected");
         isMqttConnected = true;
         break;
 
     case MQTT_EVENT_DISCONNECTED:
-        // Serial.println("MQTT_EVENT_DISCONNECTED");
-        // break;
-
         Serial.println("MQTT Disconnected");
         isMqttConnected = false;
         break;
@@ -173,12 +163,26 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
         break;
 
     case MQTT_EVENT_DATA:
-        Serial.print("Received data on topic=");
-        Serial.write(event->topic, event->topic_len);
-        Serial.println();
-        Serial.print("Data: ");
-        Serial.write(event->data, event->data_len);
-        Serial.println();
+        // Serial.print("Received data on topic=");
+        // Serial.write(event->topic, event->topic_len);
+        // Serial.println();
+        // Serial.print("Data: ");
+        // Serial.write(event->data, event->data_len);
+        // Serial.println();
+
+        // 创建 mqtt_message_t 结构并填充数据
+        mqtt_message_t message;
+        message.topic = strndup(event->topic, event->topic_len);
+        message.topic_len = event->topic_len;
+        message.data = strndup(event->data, event->data_len);
+        message.data_len = event->data_len;
+
+        // 调用处理函数
+        handle_mqtt_message(&message);
+
+        // 释放分配的内存
+        free(message.topic);
+        free(message.data);
         break;
 
     case MQTT_EVENT_ERROR:
@@ -202,6 +206,21 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
         break;
     }
     return ESP_OK;
+}
+
+void handle_mqtt_message(const mqtt_message_t *message) {
+    if (message == NULL) return;
+
+    Serial.print("Received MQTT message on topic: ");
+    Serial.write((const uint8_t *)message->topic, message->topic_len);
+    Serial.println();
+
+    Serial.print("Message data: ");
+    Serial.write((const uint8_t *)message->data, message->data_len);
+    Serial.println();
+
+    // 在此处添加处理接收到的 MQTT 消息的代码
+    // 例如，根据 topic 进行分支处理，解析 data，等等
 }
 
 static void on_ppp_changed(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)

@@ -25,7 +25,9 @@ void setup(void)
     Serial.print("---");
     Serial.println(my4gModemOperator());
 
-    initModemMQTT();
+    //initModemMQTT();
+    initModemMQTT("myMqttClientId", "mqtt://test.mosquitto.org", 1883, "", "");
+
 
     // xEventGroupWaitBits(event_group, GOT_DATA_BIT, pdTRUE, pdTRUE, portMAX_DELAY);    //阻塞模式，可能导致别的程序代码使用不了
 

@@ -34,7 +34,9 @@ void publishMessage(const char *topic, const char *data);
 
 void initializeModem();
 void handleModem();
-void initModemMQTT(void);
+// void initModemMQTT(void);
+void initModemMQTT(const char* client_id, const char* mqtt_url, int mqtt_port, const char* user, const char* password);
+
 
 static void on_ip_event(void *arg, esp_event_base_t event_base,int32_t event_id, void *event_data);
 static void on_ppp_changed(void *arg, esp_event_base_t event_base,int32_t event_id, void *event_data);

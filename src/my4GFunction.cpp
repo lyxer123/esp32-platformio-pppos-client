@@ -163,13 +163,6 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
         break;
 
     case MQTT_EVENT_DATA:
-        // Serial.print("Received data on topic=");
-        // Serial.write(event->topic, event->topic_len);
-        // Serial.println();
-        // Serial.print("Data: ");
-        // Serial.write(event->data, event->data_len);
-        // Serial.println();
-
         // 创建 mqtt_message_t 结构并填充数据
         mqtt_message_t message;
         message.topic = strndup(event->topic, event->topic_len);
@@ -437,14 +430,36 @@ String my4gModemOperator(void)
     return dce->oper;
 }
 
-void initModemMQTT(void)
-{    /* Config MQTT */
-    esp_mqtt_client_config_t mqtt_config = {
-        .event_handle = mqtt_event_handler,
-        .uri = BROKER_URL,
-    };
+// void initModemMQTT(void)
+// {    /* Config MQTT */
+//     esp_mqtt_client_config_t mqtt_config = {
+//         .event_handle = mqtt_event_handler,
+//         .uri = BROKER_URL,
+//         .
+//     };
+//     esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_config);
+//     esp_mqtt_client_start(mqtt_client);
+// }
+
+void initModemMQTT(const char* client_id, const char* mqtt_url, int mqtt_port, const char* user, const char* password) {
+    esp_mqtt_client_config_t mqtt_config = {}; // 初始化为零
+    mqtt_config.event_handle = mqtt_event_handler;
+    mqtt_config.client_id = client_id;
+    mqtt_config.uri = mqtt_url;
+    mqtt_config.port = mqtt_port;
+    mqtt_config.username = user;
+    mqtt_config.password = password;
+
     esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_config);
-    esp_mqtt_client_start(mqtt_client);
+    if (mqtt_client == NULL) {
+        ESP_LOGE("MQTT", "Failed to initialize MQTT client");
+        return;
+    }
+
+    esp_err_t start_result = esp_mqtt_client_start(mqtt_client);
+    if (start_result != ESP_OK) {
+        ESP_LOGE("MQTT", "Failed to start MQTT client: %s", esp_err_to_name(start_result));
+    }
 }
 
 void handleModem()

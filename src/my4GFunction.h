@@ -34,7 +34,7 @@ void publishMessage(const char *topic, const char *data);
 
 void initializeModem();
 void handleModem();
-// void initModemMQTT(void);
+
 void initModemMQTT(const char* client_id, const char* mqtt_url, int mqtt_port, const char* user, const char* password);
 
 
@@ -44,6 +44,8 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event);
 void my4GInformation(modem_dce_t *dce);
 String my4gModemOperator(void);
 
+String creatMyMqttClientID(char *mydeviceNum, char *myproductId, char *myuserId);
+String creatMyAesPassword(char *mymqttPwd, char *myauthCode, char *mymqttSecret, char *mywumei_iv);
 
 // 声明处理 MQTT 消息的函数
 void handle_mqtt_message(const mqtt_message_t *message);

@@ -5,6 +5,12 @@
 #include "bg96.h"
 #include "sim7600.h"
 
+#include "myBase64.h"
+#include <mbedtls/aes.h> //ESP32加密需要的库，ESP8266不需要
+#include <cstddef>       //null的定义
+
+#include "mySystem.h" // 包含"MySystem.h"来使用DEBUG_PRINTLN和DEBUG_PRINT
+
 #define BROKER_URL "mqtt://test.mosquitto.org"
 
 const char *mqtt_server = "test.mosquitto.org"; // 替换为您的 MQTT 服务器地址
@@ -430,17 +436,6 @@ String my4gModemOperator(void)
     return dce->oper;
 }
 
-// void initModemMQTT(void)
-// {    /* Config MQTT */
-//     esp_mqtt_client_config_t mqtt_config = {
-//         .event_handle = mqtt_event_handler,
-//         .uri = BROKER_URL,
-//         .
-//     };
-//     esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_config);
-//     esp_mqtt_client_start(mqtt_client);
-// }
-
 void initModemMQTT(const char* client_id, const char* mqtt_url, int mqtt_port, const char* user, const char* password) {
     esp_mqtt_client_config_t mqtt_config = {}; // 初始化为零
     mqtt_config.event_handle = mqtt_event_handler;
@@ -460,6 +455,83 @@ void initModemMQTT(const char* client_id, const char* mqtt_url, int mqtt_port, c
     if (start_result != ESP_OK) {
         ESP_LOGE("MQTT", "Failed to start MQTT client: %s", esp_err_to_name(start_result));
     }
+}
+
+String creatMyMqttClientID(char *mydeviceNum, char *myproductId, char *myuserId)
+{
+    String clientId = "E&" + (String)mydeviceNum + "&" + (String)myproductId + "&" + (String)myuserId; // 连接 设备mqtt客户端Id格式为：认证类型(E=加密、S=简单) & 设备编号 & 产品ID & 用户ID
+    //printMsg("client ID:" + clientId);
+    return clientId;
+}
+
+// 加密 (AES-CBC-128-pkcs5padding)，测试ok
+String IOTencrypt(String plain_data, char *wumei_key, char *wumei_iv)
+{
+    int i;
+    // pkcs7padding填充 Block Size : 16
+    int len = plain_data.length();
+
+    int n_blocks = len / 16 + 1;
+    uint8_t n_padding = n_blocks * 16 - len;
+    uint8_t data[n_blocks * 16];
+    memcpy(data, plain_data.c_str(), len);
+    for (i = len; i < n_blocks * 16; i++)
+    {
+        data[i] = n_padding;
+    }
+    uint8_t key[16], iv[16];
+    uint8_t crypt_data[3 * 16] = {0};
+
+    memcpy(key, wumei_key, 16);
+    memcpy(iv, wumei_iv, 16);
+
+    memset(crypt_data, 0, 48);
+
+    len = n_blocks * 16;
+    // 加密
+    mbedtls_aes_context aes_ctx;
+    mbedtls_aes_init(&aes_ctx);
+    mbedtls_aes_setkey_enc(&aes_ctx, key, 128);
+    mbedtls_aes_crypt_cbc(&aes_ctx, MBEDTLS_AES_ENCRYPT, len, iv, data, crypt_data);
+
+    // Base64编码
+    char encoded_data[base64_enc_len(len)];
+    base64_encode(encoded_data, (char *)crypt_data, len);
+
+    return String(encoded_data);
+}
+
+// 测试ok，这里必须要能获得esp32的时间数据，否则不能正确登录平台
+String generationAESPwd(char *mymqttPwd, char *myauthCode, char *mymqttSecret, char *mywumei_iv) // 生成加密密码
+{
+    float now = (float)getEsp32TimeEpoch() * 1000; // 获取esp32内部时间数据
+    // float now = 111178930;                       // 获取esp32内部时间数据
+    float expireTime = now + 1 * 60 * 60 * 1000; // 这里可now值以取自esp32的内部时钟数据，过期时间 = 当前时间 + 1小时
+
+    String mypassword = ""; // 加密认证，密码格式为：mqtt密码 & 过期时间 & 授权码（可选），产品启用了授权码就必须加上
+    if (myauthCode == "")
+    {
+        mypassword = (String)mymqttPwd + "&" + String(expireTime, 0);
+    }
+    else
+    {
+        mypassword = (String)mymqttPwd + "&" + String(expireTime, 0) + "&" + myauthCode;
+    }
+    // 密码加密
+
+    //printMsg("password not encrypted:" + mypassword);
+    String encryptPassword = IOTencrypt(mypassword, mymqttSecret, mywumei_iv);
+    // printMsg("password encrypted:" + encryptPassword);
+
+    return encryptPassword;
+}
+
+String creatMyAesPassword(char *mymqttPwd, char *myauthCode, char *mymqttSecret, char *mywumei_iv)
+{
+    String aesPassword = generationAESPwd(mymqttPwd, myauthCode, mymqttSecret, mywumei_iv); // 生成mqtt加密密码
+    //printMsg("MQTT Password:" + aesPassword);
+
+    return aesPassword;
 }
 
 void handleModem()
